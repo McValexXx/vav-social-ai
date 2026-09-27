@@ -418,13 +418,25 @@ async function queueVideo(env: Env, post: DbPost): Promise<DbVideo> {
 
 async function sendVideoPreview(env: Env, post: DbPost, videoUrl: string): Promise<void> {
   if (!env.TELEGRAM_CHAT_ID) return;
-  await telegram(env, "sendVideo", {
-    chat_id: env.TELEGRAM_CHAT_ID,
-    video: videoUrl,
-    caption: `<b>Reel готов · ${escapeHtml(postLabel(post))}</b>\n${escapeHtml(post.title)}\n\nОпубликовать: /publishvideo ${post.id}`,
-    parse_mode: "HTML",
-    supports_streaming: true
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is missing");
+  const source = await fetch(videoUrl, { redirect: "follow" });
+  if (!source.ok) throw new Error(`Не удалось скачать Reel: HTTP ${source.status}`);
+  const bytes = await source.arrayBuffer();
+  if (bytes.byteLength === 0 || bytes.byteLength > 48 * 1024 * 1024) {
+    throw new Error(`Некорректный размер Reel: ${bytes.byteLength} байт`);
+  }
+  const form = new FormData();
+  form.set("chat_id", env.TELEGRAM_CHAT_ID);
+  form.set("caption", `<b>Reel готов · ${escapeHtml(postLabel(post))}</b>\n${escapeHtml(post.title)}\n\nОпубликовать: /publishvideo ${post.id}`);
+  form.set("parse_mode", "HTML");
+  form.set("supports_streaming", "true");
+  form.set("video", new Blob([bytes], { type: "video/mp4" }), `vav-reel-${post.id}.mp4`);
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendVideo`, {
+    method: "POST",
+    body: form
   });
+  const body = await response.json() as { ok: boolean; description?: string };
+  if (!response.ok || !body.ok) throw new Error(body.description ?? `Telegram sendVideo failed: HTTP ${response.status}`);
 }
 
 async function acceptVideoCallback(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
