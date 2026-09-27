@@ -24,6 +24,7 @@
     "PUBLIC_BASE_URL": "https://vav-social-ai.vav-ai-secretar-cloudflare.workers.dev",
     "META_API_VERSION": "v24.0",
     "META_IG_USER_ID": "17841400982680127",
+    "GITHUB_RENDER_REPO": "McValexXx/vav-social-ai",
     "AUTOMATION_ENABLED": "true",
     "AUTO_PUBLISH": "false"
   },
