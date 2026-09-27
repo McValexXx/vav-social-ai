@@ -1,0 +1,78 @@
+name: Render VAV Reel
+
+on:
+  repository_dispatch:
+    types: [render-vav-reel]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vav-reel-${{ github.event.client_payload.post_id }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VAV_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+      VAV_CALLBACK_SECRET: ${{ secrets.VAV_CALLBACK_SECRET }}
+      VAV_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      PIPER_MODEL: cache/piper/ru_RU-denis-medium.onnx
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python -m pip install --upgrade pip
+          python -m pip install piper-tts
+
+      - uses: actions/cache@v4
+        with:
+          path: cache/piper
+          key: piper-ru-denis-medium-v1
+
+      - name: Download Russian voice
+        run: |
+          mkdir -p cache/piper
+          test -f "$PIPER_MODEL" || curl -fL --retry 3 -o "$PIPER_MODEL" "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx"
+          test -f "$PIPER_MODEL.json" || curl -fL --retry 3 -o "$PIPER_MODEL.json" "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx.json"
+
+      - name: Save payload
+        run: python -c "import os,pathlib; pathlib.Path('payload.json').write_text(os.environ['VAV_PAYLOAD'], encoding='utf-8')"
+
+      - name: Notify rendering
+        run: python video-renderer/callback.py --status rendering
+
+      - name: Render vertical video
+        id: render
+        run: |
+          POST_ID=$(python -c "import json; print(json.load(open('payload.json'))['post_id'])")
+          ASSET="vav-reel-${POST_ID}-${GITHUB_RUN_ID}.mp4"
+          mkdir -p output
+          python video-renderer/render.py --payload payload.json --model "$PIPER_MODEL" --output "output/$ASSET"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view vav-media >/dev/null 2>&1 || gh release create vav-media --title "VAV Social AI media" --notes "Automatically rendered media for approved VAV Group content."
+          gh release upload vav-media "output/${{ steps.render.outputs.asset }}" --clobber
+
+      - name: Notify ready
+        env:
+          VIDEO_URL: https://github.com/${{ github.repository }}/releases/download/vav-media/${{ steps.render.outputs.asset }}
+        run: python video-renderer/callback.py --status ready --video-url "$VIDEO_URL"
+
+      - name: Notify failure
+        if: failure()
+        continue-on-error: true
+        run: python video-renderer/callback.py --status failed --error "GitHub Actions render failed. Open the run URL for logs."
