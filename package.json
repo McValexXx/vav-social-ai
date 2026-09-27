@@ -1,0 +1,20 @@
+{
+  "name": "vav-social-ai",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate-visuals.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply vav-social-ai --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "sharp": "latest",
+    "typescript": "latest",
+    "vitest": "latest",
+    "wrangler": "latest"
+  }
+}
