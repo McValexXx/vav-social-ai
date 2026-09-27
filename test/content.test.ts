@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { POSTS } from "../src/content";
-import { containsAutomationKeyword, d1BlobBytes, parseNewsFeed, parseTelegramCommand } from "../src/index";
+import { containsAutomationKeyword, d1BlobBytes, isImageSafetyError, parseNewsFeed, parseTelegramCommand, safeImageText } from "../src/index";
 import { TOPICS, topicByNumber } from "../src/topics";
 
 describe("weekly content", () => {
@@ -87,6 +87,17 @@ describe("D1 image blobs", () => {
 
   it("rejects invalid blob values", () => {
     expect(() => d1BlobBytes("255,216,255")).toThrow("Некорректные данные");
+  });
+});
+
+describe("AI image safety fallback", () => {
+  it("removes unsafe image terms while preserving the business topic", () => {
+    expect(safeImageText("AI marketing — NSFW nude test", 100)).toBe("AI marketing business technology business technology test");
+  });
+
+  it("recognizes Cloudflare safety error 8007", () => {
+    expect(isImageSafetyError(new Error("8007: Input prompt contains NSFW content"))).toBe(true);
+    expect(isImageSafetyError(new Error("network timeout"))).toBe(false);
   });
 });
 
