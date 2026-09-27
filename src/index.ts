@@ -244,10 +244,25 @@ function jpegBytes(value: unknown): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+export function safeImageText(value: string, maxLength: number): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}\s.,:;!?()\-]/gu, " ")
+    .replace(/\b(?:nsfw|nude|nudity|naked|sex|sexual|porn|erotic|fetish|weapon|blood|gore|drug|наркотик\w*|оружи\w*|кров\w*|обнаж\w*|эротик\w*|секс\w*)\b/giu, "business technology")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function isImageSafetyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:\b8007\b|NSFW|unsafe content|safety filter)/i.test(message);
+}
+
 async function createPostImage(env: Env, postId: number, variant: number, title: string, topic: string): Promise<string> {
   const prompt = [
     "Premium editorial Instagram visual for a modern B2B technology and automation company.",
-    `Business topic: ${topic.slice(0, 700)}. Main idea: ${title.slice(0, 160)}.`,
+    `Business topic: ${safeImageText(topic, 700)}. Main idea: ${safeImageText(title, 160)}.`,
     "Square composition, sophisticated dark navy and electric blue palette, realistic business technology scene,",
     "strong focal point, cinematic studio lighting, clean luxury advertising aesthetic, high detail,",
     "no words, no letters, no logos, no watermark, no interface screenshots."
@@ -255,10 +270,22 @@ async function createPostImage(env: Env, postId: number, variant: number, title:
   const imageAi = env.AI as unknown as {
     run(model: string, input: Record<string, unknown>): Promise<unknown>;
   };
-  const result = await imageAi.run(IMAGE_MODEL, {
-    prompt: prompt.slice(0, 2048),
-    steps: 4
-  }) as { image?: string };
+  let result: { image?: string };
+  try {
+    result = await imageAi.run(IMAGE_MODEL, { prompt: prompt.slice(0, 2048), steps: 4 }) as { image?: string };
+  } catch (error) {
+    if (!isImageSafetyError(error)) throw error;
+    await logEvent(env, "image_safety_retry", postId, "Cloudflare 8007; safe business fallback used");
+    result = await imageAi.run(IMAGE_MODEL, {
+      prompt: [
+        "Safe corporate editorial illustration for a B2B automation company.",
+        "Abstract artificial intelligence network, geometric data streams, business analytics and workflow automation.",
+        "Empty modern office environment, no people, dark navy and electric blue palette, premium studio lighting,",
+        "square composition, clean professional advertising aesthetic, no words, no letters, no logos, no watermark."
+      ].join(" "),
+      steps: 4
+    }) as { image?: string };
+  }
   if (!result.image) throw new Error("AI не вернул изображение");
   const bytes = base64Bytes(result.image);
   if (bytes.byteLength === 0 || bytes.byteLength > 1_900_000) {
