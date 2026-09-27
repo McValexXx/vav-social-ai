@@ -454,7 +454,13 @@ async function acceptVideoCallback(request: Request, env: Env, ctx: ExecutionCon
     WHERE post_id=?`).bind(status, videoUrl, runUrl, error, status, postId).run();
   await logEvent(env, `video_${status}`, postId, error ?? videoUrl ?? runUrl ?? undefined);
   const post = await getPostById(env, postId);
-  if (post && status === "ready" && videoUrl) ctx.waitUntil(sendVideoPreview(env, post, videoUrl));
+  if (post && status === "ready" && videoUrl) {
+    ctx.waitUntil(sendVideoPreview(env, post, videoUrl).catch(async error => {
+      const details = error instanceof Error ? error.message : String(error);
+      await logEvent(env, "video_preview_failed", postId, details);
+      await sendText(env, `⚠️ Reel ID ${postId} готов, но Telegram не показал видео автоматически. Повторить: /video_status ${postId}`);
+    }));
+  }
   if (status === "failed") ctx.waitUntil(sendText(env, `❌ Рендер Reel ID ${postId} завершился ошибкой: ${escapeHtml(error ?? "неизвестная ошибка")}`));
   return json({ ok: true });
 }
@@ -1038,6 +1044,13 @@ async function sendVideoStatus(env: Env, postId: number): Promise<void> {
   if (!video) {
     await sendText(env, `Для публикации ID ${postId} видео ещё не создавалось.`);
     return;
+  }
+  if (video.status === "ready" && video.video_url) {
+    const post = await getPostById(env, postId);
+    if (post) {
+      await sendVideoPreview(env, post, video.video_url);
+      return;
+    }
   }
   const labels: Record<string, string> = {
     queued: "в очереди",
